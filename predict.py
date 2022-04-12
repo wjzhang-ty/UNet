@@ -26,14 +26,11 @@ def predict_img(net, full_img):
 
         full_mask = tf(probs.cpu()).squeeze()
 
-    return F.one_hot(full_mask.argmax(dim=0), 2).permute(2, 0, 1).numpy()
+    return F.one_hot(full_mask.argmax(dim=0), net.n_classes).permute(2, 0, 1).numpy()
 
-# 归一化的图片转原图
+# mask转图像。预测图为0、1、2，乘127.5得到0、128、255
 def mask_to_image(mask: np.ndarray):
-    if mask.ndim == 2:
-        return Image.fromarray((mask * 255).astype(np.uint8))
-    elif mask.ndim == 3:
-        return Image.fromarray((np.argmax(mask, axis=0) * 255).astype(np.uint8))
+    return Image.fromarray((np.argmax(mask, axis=0) * 127.5).astype(np.uint8))
 
 
 if __name__ == '__main__':
@@ -44,7 +41,7 @@ if __name__ == '__main__':
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # UNet，加载参数    
-    net = UNet(3,2)
+    net = UNet(3,3)
     net.to(device=device)
     net.load_state_dict(torch.load('MODEL.pth', map_location=device))
 

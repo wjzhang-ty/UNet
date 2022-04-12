@@ -25,7 +25,7 @@ def train(epochs,batch_size,in_cannel,n_classes):
     ## 准备训练集 ##
     ###############
     path = "."
-    dataset = MyDataset(path + "/data/imgs", path + "/data/masks", "_mask")
+    dataset = MyDataset(path + "/data/imgs", path + "/data/masks", "")
     val_len = int(len(dataset) * 0.1)
     train_len = len(dataset) - val_len
     # 分割训练集、测试集
@@ -62,8 +62,9 @@ def train(epochs,batch_size,in_cannel,n_classes):
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "max", patience=2)
     # 混合精度
     grad_scaler = torch.cuda.amp.GradScaler(enabled=gradScaler)
-    # 损失函数
+    # 损失函数-他是个类在此处实例化
     criterion = nn.CrossEntropyLoss()
+    # criterion = F.mse_loss()
 
     ###############
     #### train ####
@@ -74,21 +75,15 @@ def train(epochs,batch_size,in_cannel,n_classes):
         epoch_loss = 0
         with tqdm(total=train_len, desc=f"进度 {epoch + 1}/{epochs}", unit="img") as pbar:
             for batch in train_loader:
-                images = batch["image"]
-                true_masks = batch["mask"]
-
-                images = images.to(device=device, dtype=torch.float32)
-                true_masks = true_masks.to(device=device, dtype=torch.long)
+                images = batch["image"].to(device=device, dtype=torch.float32)
+                true_masks = batch["mask"].to(device=device, dtype=torch.long)
+                x=torch.max(true_masks)
+                # true_masks=F.one_hot(true_masks).permute(0, 3, 1, 2)
 
                 with torch.cuda.amp.autocast(enabled=gradScaler):
                     masks_pred = net(images)
-                    # 损失函数为：交叉熵+筛子系数
+                    # 交叉熵+筛子系数
                     loss = criterion(masks_pred, true_masks)
-                    #  + dice_loss(
-                    #     F.softmax(masks_pred, dim=1).float(),
-                    #     F.one_hot(true_masks, n_classes).permute(0, 3, 1, 2).float(),
-                    #     multiclass=True,
-                    # )
 
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
@@ -121,11 +116,11 @@ if __name__ == "__main__":
     ###############
     #### 超参数 ###
     ###############
-    epochs = 1
+    epochs = 5
     batch_size = 4
     in_cannel = 3 # 输入图像的通道数
-    n_classes = 2 # 输出通道（分几类）
+    n_classes = 3 # 输出通道（分几类）
 
     
-    os.environ["CUDA_VISIBLE_DEVICES"]="2"
+    os.environ["CUDA_VISIBLE_DEVICES"]="1"
     train(epochs,batch_size,in_cannel,n_classes)

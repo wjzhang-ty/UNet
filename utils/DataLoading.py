@@ -53,25 +53,16 @@ class MyDataset:
         img = Image.open(filename)
 
         # 宽高对齐，保证上采样、跨层链接维度对齐
-        # resizef=False # 没改就别resize了多少能省点资源
-        # w=img.size[0]
-        # h=img.size[1]
-        # base = 2**4 # 默认满足四次下采样即可
-        # if w%base>0:
-        #     w=int(w/base)*base
-        #     resizef=True
-        # if h%base>0:
-        #     h=int(h/base)*base
-        #     resizef=True
-        # if resizef: img = img.resize((w, h), Image.ANTIALIAS)
-        img = img.resize((640, 432), Image.ANTIALIAS)
+        img = img.resize((640, 432), Image.NEAREST)
         
         # 转格式
         img = np.asarray(img)
 
-        # 如果是标注图片，归一化。否则把“通道数”放在最前面
+        # mask把颜色重置为0、1、2
+        # 训练集归一化。
         if is_mask:
-            img = img
+            img[img == 128]=1
+            img[img == 255]=2
         else:
             img = (img / 255).transpose((2, 0, 1))
 
