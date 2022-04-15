@@ -6,7 +6,6 @@ import torch.nn.functional as F
 class UNet(nn.Module):
     def __init__(self,in_cannel,n_classes) -> None:
         super(UNet, self).__init__()
-        self.n_classes=n_classes
 
         # 下采样
         self.start = DoubleConv(in_cannel,64)

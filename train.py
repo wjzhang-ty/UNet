@@ -1,126 +1,92 @@
 import torch
 import os
 import torch.nn as nn
-import torch.nn.functional as F
 from torch import optim
-from torch.utils.data import DataLoader, random_split
-
-from UNet import UNet
+from torch.utils.data import DataLoader
 from evaluate import evaluate
 from tqdm import tqdm
 from pathlib import Path
 from utils.DataLoading import MyDataset
+from utils.utils import createNet
+
+# 自定义损失函数
 from utils.dice_score import dice_loss
+from utils.my_score import my_score
+
+# 超参数配置
+from config import cfg
 
 
-def train(epochs,batch_size,in_cannel,n_classes):
-    learning_rate=1e-5
-
-    gradScaler = True # 是否启用混合精度
+def train():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    net = UNet(in_cannel,n_classes)
-    net.to(device=device)
+    net_name='unet'
+    net = createNet(net_name).to(device=device)
 
     ###############
-    ## 准备训练集 ##
+    ## 准备数据集 ##
     ###############
-    path = "."
-    dataset = MyDataset(path + "/data/imgs", path + "/data/masks", "")
-    val_len = int(len(dataset) * 0.1)
-    train_len = len(dataset) - val_len
-    # 分割训练集、测试集
-    train_set, val_set = random_split(
-        dataset, [train_len, val_len], generator=torch.Generator().manual_seed(0)
-    )
-
-    ###############
-    ### Loader ####
-    ###############
-    train_loader = DataLoader(
-        train_set,
-        shuffle=False,
-        batch_size=batch_size,
-        num_workers=4,
-        pin_memory=True,
-    )
-    val_loader = DataLoader(
-        val_set,
-        shuffle=False,  # 随机打乱
-        drop_last=True,  # 丢掉batch_size分割后余下的数据
-        batch_size=batch_size,
-        num_workers=4,
-        pin_memory=True,  # 数据直接保存在所内存中，速度快
-    )
+    train_set = MyDataset("./data/train/imgs", "./data/train/masks", "")
+    val_set = MyDataset("./data/valid/imgs", "./data/valid/masks", "")
+    
+    # shuffle:随机打乱。
+    # drop_last：丢掉batch_size分割后余下的数据。
+    # pin_memory：数据直接保存在所内存中，速度快
+    train_loader = DataLoader(train_set,shuffle=True,batch_size=cfg.batch_size,num_workers=4,pin_memory=True,)
+    val_loader = DataLoader(val_set,shuffle=False,drop_last=True,batch_size=cfg.batch_size,num_workers=4,pin_memory=True)
 
     ###############
     ## optimizer ##
     ###############
-    optimizer = optim.RMSprop(
-        net.parameters(), lr=learning_rate, weight_decay=1e-8, momentum=0.9
-    )
+    # optimizer = optim.RMSprop(net.parameters(), lr=cfg.learning_rate, weight_decay=1e-8, momentum=0.9)
+    optimizer = optim.SGD(net.parameters(), lr=cfg.learning_rate, momentum=cfg.momentum, weight_decay=cfg.weight_decay)
+   
     # 两次dice loss不上升，下调学习率
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, "max", patience=2)
+   
     # 混合精度
-    grad_scaler = torch.cuda.amp.GradScaler(enabled=gradScaler)
+    grad_scaler = torch.cuda.amp.GradScaler(enabled=True)
+
     # 损失函数-他是个类在此处实例化
     criterion = nn.CrossEntropyLoss()
-    # criterion = F.mse_loss()
 
     ###############
     #### train ####
     ###############
     global_step = 0
-    for epoch in range(epochs):
+    for epoch in range(cfg.epochs):
         net.train()
-        epoch_loss = 0
-        with tqdm(total=train_len, desc=f"进度 {epoch + 1}/{epochs}", unit="img") as pbar:
+        with tqdm(total=len(train_set), desc=f"训练 {epoch + 1}/{cfg.epochs}", unit="img") as pbar:
             for batch in train_loader:
                 images = batch["image"].to(device=device, dtype=torch.float32)
                 true_masks = batch["mask"].to(device=device, dtype=torch.long)
-                x=torch.max(true_masks)
-                # true_masks=F.one_hot(true_masks).permute(0, 3, 1, 2)
 
-                with torch.cuda.amp.autocast(enabled=gradScaler):
+                with torch.cuda.amp.autocast(enabled=False):
                     masks_pred = net(images)
-                    # 交叉熵+筛子系数
+                    # 损失函数
                     loss = criterion(masks_pred, true_masks)
+                    # loss += my_score(masks_pred)
 
+                # 导数清零，后向传播什么的
                 optimizer.zero_grad(set_to_none=True)
                 grad_scaler.scale(loss).backward()
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
-                epoch_loss += loss.item()
 
                 # 更新进度条
                 pbar.update(images.shape[0])
                 global_step += 1
                 pbar.set_postfix(**{"loss": loss.item()})
 
-                # 评估
-                division_step = train_len // (10 * batch_size)
-                if division_step > 0:
-                    if global_step % division_step == 0:
-                        val_score = evaluate(net, val_loader, device)
-                        scheduler.step(val_score)
-                        print(val_score)
+        # 每轮epoch后都进行评估
+        val_score = evaluate(net, val_loader, device)
+        scheduler.step(val_score)
+        print(val_score)
 
         # 每轮都保存一下训练好的参数
-        Path(path + "/checkpoints").mkdir(parents=True, exist_ok=True)
-        torch.save(
-            net.state_dict(),
-            str((path + "/checkpoints/checkpoint_epoch{}.pth").format(epoch + 1)),
-        )
+        Path("./checkpoints").mkdir(parents=True, exist_ok=True)
+        torch.save( net.state_dict(),'./checkpoints/'+net_name+'.pth')
 
 
 if __name__ == "__main__":
-    ###############
-    #### 超参数 ###
-    ###############
-    epochs = 5
-    batch_size = 4
-    in_cannel = 3 # 输入图像的通道数
-    n_classes = 3 # 输出通道（分几类）
-
-    
     os.environ["CUDA_VISIBLE_DEVICES"]="1"
-    train(epochs,batch_size,in_cannel,n_classes)
+    train()

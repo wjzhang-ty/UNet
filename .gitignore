@@ -1,8 +1,9 @@
 data/imgs/*
 data/masks/*
 __pycache__/*
-utils/__pycache__/*
+*/__pycache__/*
 checkpoints/*
 MODEL.pth
-img.jpg
-output.jpg
+imgs/*
+*.jpg
+*.bmp

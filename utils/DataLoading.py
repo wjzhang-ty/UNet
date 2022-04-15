@@ -10,13 +10,12 @@ class MyDataset:
     """
     images_dir：训练集地址。
     masks_dir：训练集的标注地址。
-    mask_suffix：标注名称后缀。
     """
 
-    def __init__(self, images_dir, masks_dir, mask_suffix="") -> None:
+    def __init__(self, images_dir, masks_dir, origin=False) -> None:
         self.images_dir = Path(images_dir)
         self.masks_dir = Path(masks_dir)
-        self.mask_suffix = mask_suffix
+        self.origin = origin
 
         self.ids = [
             splitext(file)[0]
@@ -27,23 +26,39 @@ class MyDataset:
     def __getitem__(self, idx):
         # 组装path
         name = self.ids[idx]
-        mask_file = list(self.masks_dir.glob(name + self.mask_suffix + ".*"))
+        mask_file = list(self.masks_dir.glob(name + ".*"))
         img_file = list(self.images_dir.glob(name + ".*"))
 
         # 打开图片
         mask = self.preprocess(filename=mask_file[0], is_mask=True)
         img = self.preprocess(filename=img_file[0])
+        if not self.origin:
+            return {
+                "image": torch.as_tensor(img.copy()).float().contiguous(),
+                "mask": torch.as_tensor(mask.copy()).long().contiguous(),
+            }
+
+
+        origin_mask = list(self.masks_dir.glob(name + ".*"))
+        origin_file = list(self.images_dir.glob(name + ".*"))
+        originmask = self.preprocess(filename=origin_mask[0], is_mask=True, origin=True)
+        origin = self.preprocess(filename=origin_file[0], origin=True)
 
         return {
             "image": torch.as_tensor(img.copy()).float().contiguous(),
             "mask": torch.as_tensor(mask.copy()).long().contiguous(),
+            "origin": torch.as_tensor(origin.copy()).float().contiguous(),
+            "originmask": torch.as_tensor(originmask.copy()).float().contiguous()
         }
+
+
+        
 
     def __len__(self):
         return len(self.ids)
 
     @staticmethod
-    def preprocess(filename, is_mask=False):
+    def preprocess(filename, is_mask=False, origin=False):
         """
         图片处理
         filename：图片路径+名字
@@ -53,7 +68,8 @@ class MyDataset:
         img = Image.open(filename)
 
         # 宽高对齐，保证上采样、跨层链接维度对齐
-        img = img.resize((640, 432), Image.NEAREST)
+        if not origin:
+            img = img.resize((512, 512), Image.NEAREST)
         
         # 转格式
         img = np.asarray(img)
